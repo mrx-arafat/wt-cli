@@ -14,6 +14,52 @@ SCRIPT_PATH="$INSTALL_DIR/wt.sh"
 SOURCE_LINE="[ -f \"$SCRIPT_PATH\" ] && source \"$SCRIPT_PATH\""
 MARKER="# wt-cli: git worktree manager (https://github.com/mrx-arafat/wt-cli)"
 
+check_prereqs() {
+  local missing=()
+  for bin in git awk curl; do
+    command -v "$bin" >/dev/null 2>&1 || missing+=("$bin")
+  done
+  [ ${#missing[@]} -eq 0 ] && return 0
+
+  echo "wt-cli: missing required tool(s): ${missing[*]}"
+  echo ""
+  case "$(uname -s)" in
+    Darwin)
+      echo "Install the Xcode Command Line Tools (provides git, curl, awk):"
+      echo "  xcode-select --install"
+      if command -v brew >/dev/null 2>&1; then
+        echo "Or, with Homebrew:"
+        echo "  brew install ${missing[*]}"
+      fi
+      ;;
+    Linux)
+      if command -v apt-get >/dev/null 2>&1; then
+        echo "  sudo apt-get update && sudo apt-get install -y ${missing[*]}"
+      elif command -v dnf >/dev/null 2>&1; then
+        echo "  sudo dnf install -y ${missing[*]}"
+      elif command -v yum >/dev/null 2>&1; then
+        echo "  sudo yum install -y ${missing[*]}"
+      elif command -v pacman >/dev/null 2>&1; then
+        echo "  sudo pacman -S --noconfirm ${missing[*]}"
+      elif command -v apk >/dev/null 2>&1; then
+        echo "  sudo apk add ${missing[*]}"
+      elif command -v zypper >/dev/null 2>&1; then
+        echo "  sudo zypper install -y ${missing[*]}"
+      else
+        echo "  install ${missing[*]} using your distro's package manager"
+      fi
+      ;;
+    *)
+      echo "  install ${missing[*]} using your platform's package manager"
+      ;;
+  esac
+  echo ""
+  echo "Then re-run this installer."
+  return 1
+}
+
+check_prereqs || exit 1
+
 mkdir -p "$INSTALL_DIR"
 
 SCRIPT_DIR=""
