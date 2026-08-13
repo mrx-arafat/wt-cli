@@ -16,8 +16,11 @@ MARKER="# wt-cli: git worktree manager (https://github.com/mrx-arafat/wt-cli)"
 
 mkdir -p "$INSTALL_DIR"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$SCRIPT_DIR/wt.sh" ]; then
+SCRIPT_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/wt.sh" ]; then
   cp "$SCRIPT_DIR/wt.sh" "$SCRIPT_PATH"
 else
   curl -fsSL "$REPO_RAW/wt.sh" -o "$SCRIPT_PATH"
