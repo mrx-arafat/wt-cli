@@ -84,12 +84,23 @@ The installer:
 2. Copies `wt.sh` to `~/.wt-cli/wt.sh`.
 3. Appends one `source` line to whichever of `~/.zshrc`, `~/.bashrc`, `~/.bash_profile` exist on your machine.
 
-It's idempotent - run it again anytime (e.g. to pick up an update) and it won't duplicate anything.
+It's idempotent - run it again anytime and it won't duplicate anything.
 Restart your shell afterward, or:
 
 ```sh
 source ~/.wt-cli/wt.sh
 ```
+
+### Update
+
+```sh
+wt update          # or: wt-cli --update
+```
+
+It downloads the latest `wt.sh`, checks that it really is `wt.sh` and parses in your shell, swaps it in, and reloads it in the shell you ran it from.
+If anything is off (no network, a bad download) your install is left untouched.
+Already-open shells keep the old version until you `source ~/.wt-cli/wt.sh` or open a new tab.
+`wt update --force` reinstalls even when you're already on the latest.
 
 ## Prerequisites
 
@@ -163,6 +174,7 @@ Piped output, or `wt ls -p`, is always the plain table, so scripts and AI agents
 | `wt clear` | Same as `wt rm all` |
 | `wt clean` | Remove every worktree whose branch is fully merged into the default branch. Skips dirty trees, lists what it will remove, asks once |
 | `wt prune` | Drop stale entries - worktrees git still tracks whose directory was deleted |
+| `wt update [--force]` | Self-update to the latest release and reload it in this shell. `wt-cli --update` does the same |
 | `wt help` / `wt version` | Show the command list / version |
 
 A **target** is an ID, a worktree name (its directory name - what you passed to `wt add`), a branch, or a unique case-insensitive substring of either.

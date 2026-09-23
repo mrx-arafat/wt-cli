@@ -245,6 +245,28 @@ case_add() {
     eval 'printf "%s\n" "$OUT" | grep -q "rc=[1-9]" && [ ! -e "$R/.worktrees/bad..name" ] && ! git -C "$R" show-ref --quiet --verify "refs/heads/bad..name"'
 }
 
+# Self-update: an old install is replaced from WT_UPDATE_URL and reloaded in
+# the running shell; same version = no-op; a bad download is refused.
+case_update() {
+  local sh="$1" D="$TMP/upd-$1" cur
+  cur=$(sed -n 's/^WT_VERSION="\(.*\)"/\1/p' "$WT_SH")
+  mkdir -p "$D/inst"
+  sed 's/^WT_VERSION=.*/WT_VERSION="0.0.1"/' "$WT_SH" >"$D/inst/wt.sh"
+  cp "$WT_SH" "$D/pub.sh"
+  echo 'echo not wt' >"$D/bad.sh"
+  WT_SH="$D/inst/wt.sh" wtrun "$sh" "$D" "WT_UPDATE_URL='file://$D/pub.sh' wt update; echo \"rc=\$? v=\$WT_VERSION\""
+  assert_true "update[$sh] old install is replaced and reloaded in this shell" \
+    eval 'cmp -s "$D/inst/wt.sh" "$D/pub.sh" && printf "%s\n" "$OUT" | grep -q "rc=0 v=$cur"'
+  WT_SH="$D/inst/wt.sh" wtrun "$sh" "$D" "WT_UPDATE_URL='file://$D/pub.sh' wt-cli --update; echo \"rc=\$?\""
+  assert_true "update[$sh] wt-cli --update on the latest says up to date" \
+    eval 'printf "%s\n" "$OUT" | grep -qi "up to date" && printf "%s\n" "$OUT" | grep -q "rc=0"'
+  sed 's/^WT_VERSION=.*/WT_VERSION="0.0.1"/' "$WT_SH" >"$D/inst/wt.sh"
+  cp "$D/inst/wt.sh" "$D/before.sh"
+  WT_SH="$D/inst/wt.sh" wtrun "$sh" "$D" "WT_UPDATE_URL='file://$D/bad.sh' wt update; echo \"rc=\$?\""
+  assert_true "update[$sh] a download that is not wt.sh is refused, install untouched" \
+    eval 'cmp -s "$D/inst/wt.sh" "$D/before.sh" && printf "%s\n" "$OUT" | grep -q "rc=[1-9]"'
+}
+
 case_perf() {
   local sh="$1" R="$TMP/perf-$1/r" i=1 secs TIMEFORMAT='%3R'
   mkrepo "$R"
@@ -344,6 +366,7 @@ $sh: not installed, skipped"; continue; }
   case_safety "$sh"
   case_prune "$sh"
   case_add "$sh"
+  case_update "$sh"
   case_perf "$sh"
   case_tui "$sh"
 done

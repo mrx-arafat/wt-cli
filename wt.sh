@@ -21,6 +21,7 @@
 #   wt rm [sel...] [-k] [-y]  remove worktree(s): 2 4 5 | 2,4 | 2-5 | name | all
 #   wt clear                  remove ALL linked worktrees (= wt rm all)
 #   wt prune                  drop stale entries whose directory was deleted
+#   wt update                 self-update to the latest release (= wt-cli --update)
 #   wt help | wt version      show help / version
 #
 # Config (via git config, no extra files):
@@ -43,7 +44,16 @@
 # consecutive tabs collapse and an empty field shifts every later column -
 # that's why empty values are always written as "-".
 
-WT_VERSION="3.0.0"
+WT_VERSION="3.1.0"
+
+# Where this file lives, captured at source time so `wt update` can replace
+# it in place (no forks here: this runs on every shell startup).
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+  _WT_SELF="${(%):-%x}"
+else
+  _WT_SELF="${BASH_SOURCE[0]:-}"
+fi
+[[ -z "$_WT_SELF" || "$_WT_SELF" == /* ]] || _WT_SELF="$PWD/$_WT_SELF"
 
 # ---- data layer -------------------------------------------------------------
 
@@ -1264,6 +1274,78 @@ _wt_tui_finish() {
   esac
 }
 
+# a < b for dotted versions ("3.2.0" < "3.10.0").
+_wt_version_lt() {
+  awk -v a="$1" -v b="$2" 'BEGIN {
+    n = split(a, x, "."); m = split(b, y, "."); if (m > n) n = m
+    for (i = 1; i <= n; i++) { if (x[i] + 0 < y[i] + 0) exit 0; if (x[i] + 0 > y[i] + 0) exit 1 }
+    exit 1 }'
+}
+
+# `wt update` / `wt-cli --update`: download the latest wt.sh, make sure it IS
+# wt.sh and parses in this shell, swap it in atomically, reload it right here.
+# Anything off (network, 404 page, syntax error) leaves the install untouched.
+_wt_update() {
+  local force=0 a url target tmp newver oldver="$WT_VERSION" shname
+  for a in "$@"; do
+    case "$a" in
+      -f|--force) force=1 ;;
+      *) echo "usage: wt update [--force]" >&2; return 1 ;;
+    esac
+  done
+  url="${WT_UPDATE_URL:-https://raw.githubusercontent.com/mrx-arafat/wt-cli/main/wt.sh}"
+  target="${_WT_SELF:-}"
+  [[ -f "$target" ]] || target="$HOME/.wt-cli/wt.sh"
+  if [[ ! -f "$target" || ! -w "$target" || ! -w "$(dirname "$target")" ]]; then
+    printf '%s❌ wt: cannot write %s - reinstall with install.sh%s\n' "$_WT_RED" "${target/#$HOME/~}" "$_WT_RESET" >&2
+    return 1
+  fi
+  tmp="$target.new.$$"
+  printf '%s⬇  checking for a newer wt...%s\n' "$_WT_DIM" "$_WT_RESET"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --max-time 30 "$url" -o "$tmp" 2>/dev/null
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -T 30 -O "$tmp" "$url"
+  else
+    false
+  fi || {
+    rm -f "$tmp"
+    printf '%s❌ wt: download failed (%s) - your install is untouched%s\n' "$_WT_RED" "$url" "$_WT_RESET" >&2
+    return 1
+  }
+  newver=$(awk -F'"' '/^WT_VERSION=/ { print $2; exit }' "$tmp" 2>/dev/null)
+  shname=bash; [[ -n "${ZSH_VERSION:-}" ]] && shname=zsh
+  if [[ -z "$newver" ]] || ! "$shname" -n "$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    printf '%s❌ wt: the download is not a valid wt.sh - your install is untouched%s\n' "$_WT_RED" "$_WT_RESET" >&2
+    return 1
+  fi
+  if [[ $force -eq 0 && "$newver" == "$oldver" ]]; then
+    rm -f "$tmp"
+    printf '%s✅ wt v%s is up to date%s\n' "$_WT_GREEN" "$oldver" "$_WT_RESET"
+    return 0
+  fi
+  if [[ $force -eq 0 ]] && _wt_version_lt "$newver" "$oldver"; then
+    rm -f "$tmp"
+    printf '%s✅ your wt v%s is newer than the published v%s%s - keep it, or: wt update --force\n' \
+      "$_WT_GREEN" "$oldver" "$newver" "$_WT_RESET"
+    return 0
+  fi
+  chmod 644 "$tmp" && mv -f "$tmp" "$target" || {
+    rm -f "$tmp"
+    printf '%s❌ wt: could not replace %s%s\n' "$_WT_RED" "${target/#$HOME/~}" "$_WT_RESET" >&2
+    return 1
+  }
+  # shellcheck disable=SC1090
+  source "$target"
+  _wt_setup_colors
+  printf '%s✅ updated wt v%s -> v%s%s  %s(%s)%s\n' "$_WT_GREEN" "$oldver" "$WT_VERSION" "$_WT_RESET" \
+    "$_WT_DIM" "${target/#$HOME/~}" "$_WT_RESET"
+  printf '%s   already-open shells keep the old version until: source %s%s\n' \
+    "$_WT_DIM" "${target/#$HOME/~}" "$_WT_RESET"
+  printf '%s   what changed: https://github.com/mrx-arafat/wt-cli/commits/main%s\n' "$_WT_DIM" "$_WT_RESET"
+}
+
 _wt_usage() {
   cat <<EOF
 ${_WT_BOLD}${_WT_CYAN}wt${_WT_RESET} ${_WT_DIM}v${WT_VERSION} -${_WT_RESET} git worktree manager that lives in your shell
@@ -1287,6 +1369,7 @@ ${_WT_BOLD}COMMANDS${_WT_RESET}
   ${_WT_CYAN}clear${_WT_RESET}                       same as: wt rm all
   ${_WT_CYAN}clean${_WT_RESET}                       delete fully-merged worktrees (confirms)
   ${_WT_CYAN}prune${_WT_RESET}                       drop stale entries (directory deleted)
+  ${_WT_CYAN}update${_WT_RESET} [--force]             self-update to the latest (= wt-cli --update)
   ${_WT_CYAN}help${_WT_RESET} | ${_WT_CYAN}version${_WT_RESET}              this help / version
 
 ${_WT_BOLD}INTERACTIVE${_WT_RESET} ${_WT_DIM}(wt, wt ls, wt go, wt rm on a terminal)${_WT_RESET}
@@ -1324,6 +1407,7 @@ wt() {
   case "$cmd" in
     help|-h|--help) _wt_usage; return 0 ;;
     version|-v|--version) echo "wt v${WT_VERSION}"; return 0 ;;
+    update|upgrade|--update|--upgrade|self-update) _wt_update "$@"; return ;;
   esac
 
   if ! git rev-parse --git-dir &>/dev/null; then
@@ -1565,6 +1649,10 @@ EOF
   esac
 }
 
+# `wt-cli` is the project name people remember: `wt-cli --update`,
+# `wt-cli --version` and friends all just forward to wt.
+wt-cli() { wt "$@"; }
+
 # ---- tab completion ---------------------------------------------------------
 # Completes subcommands, then worktree names + branches for go/exec/open/rm.
 
@@ -1575,7 +1663,7 @@ _wt_names() {
 if [[ -n "${ZSH_VERSION:-}" ]]; then
   _wt_complete_zsh() {
     local -a subcmds names
-    subcmds=(list ls add go main exec open pr status clean rm clear prune help version)
+    subcmds=(list ls add go main exec open pr status clean rm clear prune update help version)
     if (( CURRENT == 2 )); then
       compadd -a subcmds
     else
@@ -1591,7 +1679,7 @@ elif [[ -n "${BASH_VERSION:-}" ]]; then
   _wt_complete_bash() {
     local cur="${COMP_WORDS[COMP_CWORD]}"
     if [[ $COMP_CWORD -eq 1 ]]; then
-      COMPREPLY=($(compgen -W "list ls add go main exec open pr status clean rm clear prune help version" -- "$cur"))
+      COMPREPLY=($(compgen -W "list ls add go main exec open pr status clean rm clear prune update help version" -- "$cur"))
     else
       case "${COMP_WORDS[1]}" in
         go|cd|exec|x|open|rm|remove|delete|del)
